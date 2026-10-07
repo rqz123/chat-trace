@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>聊迹 ChatTrace</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="shell">
+    <aside>
+      <div class="brand"><span class="mark">迹</span><div><strong>聊迹</strong><small>ChatTrace</small></div></div>
+      <nav>
+        <button class="nav active" data-page="status">运行状态</button>
+        <button class="nav" data-page="conversations">会话选择</button>
+        <button class="nav" data-page="messages">消息查询</button>
+        <button class="nav" data-page="summary">话题总结</button>
+      </nav>
+      <p class="local-note">只读 · 本地保存<br>仅同步明确选择的会话</p>
+    </aside>
+    <main>
+      <header><div><h1 id="page-title">运行状态</h1><p id="page-subtitle">确认微信版本和本地读取条件</p></div><span id="toast"></span></header>
+
+      <section id="page-status" class="page active">
+        <div class="hero card">
+          <div><span class="eyebrow">LOCAL ARCHIVE</span><h2>把重要对话，留在自己的电脑里。</h2><p>聊迹只读微信本地数据，不发送消息，不修改微信。</p></div>
+          <button id="sync-button" class="primary">同步已选会话</button>
+        </div>
+        <div id="status-grid" class="grid"></div>
+        <div id="orchestration" class="card">
+          <div class="section-head">
+            <div><span class="eyebrow">WECHAT SESSION</span><h3>启动微信并归档</h3></div>
+            <div class="orch-controls">
+              <label class="inline">稳定等待<select id="orch-quiet"><option value="30">30 秒</option><option value="45" selected>45 秒</option><option value="60">60 秒</option><option value="90">90 秒</option><option value="120">120 秒</option></select></label>
+              <button id="orch-start" class="primary">启动微信并等待同步</button>
+              <button id="orch-cancel" class="quiet" hidden>取消</button>
+            </div>
+          </div>
+          <p class="muted orch-note">聊迹会启动微信并等你完成登录；本地数据库连续一段时间没有新写入后，自动归档已选会话，再补扫一次。聊天数据库始终只读；启动微信属于应用生命周期控制，仅在你点击时进行。聊迹不会代替登录，也不会关闭微信。“数据暂时稳定”只表示本机暂无新写入，不代表云端消息已全部同步。</p>
+          <ol id="orch-steps" class="steps"></ol>
+          <div id="orch-detail" class="orch-detail" hidden></div>
+          <details id="orch-log" hidden><summary>流程记录</summary><ul id="orch-events" class="orch-events"></ul></details>
+        </div>
+        <div id="active-sync" class="card sync-progress" hidden>
+          <div class="section-head"><div><span class="eyebrow">SYNC IN PROGRESS</span><h3 id="sync-title">正在同步</h3></div><div class="sync-actions"><strong id="sync-percent">0%</strong><button id="sync-cancel" class="quiet">停止同步</button></div></div>
+          <div class="progress-track"><div id="sync-progress-bar" class="progress-bar"></div></div>
+          <div id="sync-stats" class="sync-stats"></div>
+        </div>
+        <div class="card"><div class="section-head"><h3>最近同步</h3><button id="refresh-jobs" class="quiet">刷新</button></div><div id="jobs"></div></div>
+      </section>
+
+      <section id="page-conversations" class="page">
+        <div class="toolbar wrap conv-toolbar">
+          <input id="conversation-filter" placeholder="搜索会话">
+          <label class="inline"><input type="checkbox" id="show-hidden"> 显示不跟踪的会话（<span id="hidden-count">0</span>）</label>
+          <span class="spacer"></span>
+          <label class="inline">批量不跟踪<select id="inactive-days"><option value="30">30 天以上无新消息</option><option value="90">90 天以上无新消息</option><option value="180" selected>半年以上无新消息</option><option value="365">一年以上无新消息</option></select></label>
+          <button id="hide-inactive" class="quiet">不跟踪这些会话</button>
+          <button id="scan-button" class="primary">扫描本机会话</button>
+        </div>
+        <p class="muted small conv-note">“不跟踪”的会话不再显示，也不会同步；已归档的消息和话题总结都保留，可随时勾选“显示不跟踪的会话”后恢复。批量操作不会影响已选择同步的会话。没有群名、只显示为“xxxx@chatroom”的群聊会自动设为不跟踪（手动恢复后不再自动隐藏）。</p>
+        <div class="card no-pad"><table><thead><tr><th>同步</th><th>会话</th><th>类型</th><th>最近消息</th><th>历史范围</th><th>本地消息</th><th>上次同步</th><th></th></tr></thead><tbody id="conversation-list"></tbody></table></div>
+      </section>
+
+      <section id="page-messages" class="page">
+        <div class="toolbar wrap"><select id="message-conversation"><option value="">全部已归档会话</option></select><input id="message-start" type="date"><input id="message-end" type="date"><input id="message-query" placeholder="关键词，空格分隔表示同时包含"><select id="message-order"><option value="desc">最新在前</option><option value="asc">最早在前</option></select><button id="message-search" class="primary">浏览会话</button></div>
+        <div class="browse-actions"><button id="browse-latest" class="quiet">最近消息</button><button id="browse-earliest" class="quiet">从最早开始</button><button id="browse-seven-days" class="quiet">最近 7 天</button></div>
+        <p id="message-count" class="muted"></p><div id="message-list" class="timeline"></div>
+        <button id="message-more" class="quiet load-more" hidden>继续加载</button>
+      </section>
+
+      <section id="page-summary" class="page">
+        <div class="card">
+          <div class="summary-controls">
+            <label class="field">会话<select id="summary-conversation"></select></label>
+            <div class="field">时间范围
+              <div id="summary-presets" class="presets">
+                <button class="preset active" data-days="1">最近 1 天</button>
+                <button class="preset" data-days="3">最近 3 天</button>
+                <button class="preset" data-days="7">最近 1 周</button>
+                <button class="preset" data-days="custom">指定时间段</button>
+              </div>
+            </div>
+            <div id="summary-custom" class="field" hidden>起止日期
+              <div class="custom-range"><input id="summary-start" type="date"><span>至</span><input id="summary-end" type="date"></div>
+            </div>
+          </div>
+          <div class="summary-bar">
+            <p id="summary-preview" class="muted"></p>
+            <div class="summary-actions">
+              <label class="inline">模型<select id="ai-tier"></select></label>
+              <button id="summary-generate" class="primary">生成话题总结</button>
+            </div>
+          </div>
+          <p id="ai-note" class="muted small"></p>
+        </div>
+        <div class="summary-layout">
+          <div class="card summary-history"><div class="history-head"><h3>历史总结</h3><div id="history-scope" class="seg"><button class="active" data-scope="all">全部会话</button><button data-scope="conversation">本会话</button></div></div><p class="muted small history-note">按生成时间排列，保存到你删除为止。</p><ul id="summary-history"></ul></div>
+          <div id="summary-view"><div class="card muted">选择会话和时间范围后点击“生成话题总结”，或从左侧打开历史总结。</div></div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
+
