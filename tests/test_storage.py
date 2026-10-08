@@ -92,7 +92,7 @@ def test_v1_database_is_migrated(tmp_path: Path):
     storage = Storage(path)
     storage.initialize()
     with storage.connect() as conn:
-        assert conn.execute("SELECT value FROM app_meta WHERE key='schema_version'").fetchone()[0] == "3"
+        assert conn.execute("SELECT value FROM app_meta WHERE key='schema_version'").fetchone()[0] == "4"
         assert conn.execute("SELECT COUNT(*) FROM sync_cursors").fetchone()[0] == 0
         # v3 drops the unused, empty v1 "summaries" table.
         assert conn.execute("SELECT 1 FROM sqlite_master WHERE name='summaries'").fetchone() is None
@@ -191,3 +191,44 @@ def test_existing_unnamed_groups_untracked_on_startup(tmp_path: Path):
         )
     Storage(path).initialize()
     assert Storage(path).list_conversations()[0]["hidden"] == 1
+
+
+def test_v4_merges_messages_archived_on_two_computers(tmp_path: Path):
+    from chattrace.wechat_adapter import message_source_key, server_message_key
+
+    storage, cid = _storage_with_messages(tmp_path, [])
+    with storage.connect() as conn:
+        # Same server message archived on computer A (local_id 59) and B (79),
+        # plus one message without a server id.
+        for key, local_id, server_id in (("a59", 59, "777"), ("b79", 79, "777"), ("x", 5, None)):
+            conn.execute(
+                "INSERT INTO messages(conversation_id, source_key, source_local_id, source_server_id,"
+                " sort_seq, content, content_hash, source_created_at, archived_at, updated_at)"
+                " VALUES(?, ?, ?, ?, 1, '跨电脑消息', 'h', 1, 'n', 'n')",
+                (cid, key, local_id, server_id),
+            )
+        conn.execute(
+            "INSERT INTO topic_summaries(conversation_id, range_start, range_end, status, model,"
+            " prompt_version, created_at) VALUES(?, 0, 1, 'done', 'm', 'p', 'n')",
+            (cid,),
+        )
+        conn.execute(
+            "INSERT INTO summary_topics(summary_id, position, title, question, discussion_json,"
+            " conclusions_json, open_questions_json, participants_json, status)"
+            " VALUES(1, 0, 't', 'q', '[]', '[]', '[]', '[]', 'open')"
+        )
+        b_id = conn.execute("SELECT id FROM messages WHERE source_key='b79'").fetchone()[0]
+        conn.execute("INSERT INTO summary_topic_sources VALUES(1, ?)", (b_id,))
+        conn.execute("UPDATE app_meta SET value='3' WHERE key='schema_version'")
+
+    storage.initialize()
+    with storage.connect() as conn:
+        rows = conn.execute("SELECT id, source_key FROM messages ORDER BY id").fetchall()
+        assert [r["source_key"] for r in rows] == [server_message_key(cid, "777"), "x"]
+        assert conn.execute("SELECT message_id FROM summary_topic_sources").fetchone()[0] == rows[0]["id"]
+    assert _search(storage, "跨电脑")[0] == 2
+
+    # A later sync on either computer resolves to the merged row.
+    for local_id in (59, 79, 1234):
+        message = {"server_id": 777, "local_id": local_id, "sender_id": local_id}
+        assert message_source_key(cid, message) == rows[0]["source_key"]

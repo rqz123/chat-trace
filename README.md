@@ -40,6 +40,15 @@ $env:CHATTRACE_WECHATAUTO_SOURCE = "C:\path\to\wechatauto-replica"
 
 如需临时使用其他端口，可在启动前设置 `CHATTRACE_PORT` 环境变量。
 
+日常使用可以用脚本在后台启动和停止服务（数据固定保存在项目的 `data\` 目录，日志在 `data\logs\server.out` / `server.err`）：
+
+```powershell
+.\start.cmd
+.\stop.cmd        # 正在同步或生成总结时会拒绝停止；确需中断可用 .\stop.cmd -Force
+```
+
+在两台电脑间交接归档数据库，见 [DATABASE_SYNC.md](DATABASE_SYNC.md)。
+
 运行测试：
 
 ```powershell

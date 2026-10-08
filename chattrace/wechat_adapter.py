@@ -172,6 +172,36 @@ def _install_patches(module) -> None:
     # No second plaintext copy under %LOCALAPPDATA%\wechatauto_keys.
     db_class._stable_key_dirs = lambda _self: []
 
+    # Upstream falls back to %USERPROFILE%\Documents, which misses a Documents
+    # folder redirected elsewhere (e.g. OneDrive) when WeChat's config only says
+    # "MyDocument:". Callers resolve the function through module globals.
+    upstream_detect = module.auto_detect_db_dir
+
+    def auto_detect_db_dir():
+        override = os.environ.get("CHATTRACE_WECHAT_DATA_DIR")
+        if override:
+            return module._locate_account_root(override)
+        found = upstream_detect()
+        if found:
+            return found
+        documents = _documents_folder()
+        return module._locate_account_root(documents) if documents else None
+
+    module.auto_detect_db_dir = auto_detect_db_dir
+
+
+def _documents_folder() -> str | None:
+    """The shell's real Documents folder, honouring folder redirection."""
+    if sys.platform != "win32":
+        return None
+    import ctypes
+
+    buffer = ctypes.create_unicode_buffer(260)
+    CSIDL_PERSONAL = 5
+    if ctypes.windll.shell32.SHGetFolderPathW(None, CSIDL_PERSONAL, None, 0, buffer) != 0:
+        return None
+    return buffer.value or None
+
 
 def _load_readonly_db_module():
     existing = sys.modules.get("chattrace._wechat_db")
@@ -576,10 +606,27 @@ def remove_decrypted_cache(settings: Settings) -> tuple[int, int]:
     return removed, failed
 
 
+def server_message_key(conversation_id: int, server_id: Any) -> str | None:
+    """Identity from WeChat's server message id, or None when there is none.
+
+    local_id and real_sender_id are row ids in one computer's WeChat database,
+    so an archive moved between computers must not depend on them.
+    """
+    server_id = str(server_id or "").strip()
+    if not server_id or server_id == "0":
+        return None
+    raw = f"server|{conversation_id}|{server_id}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
 def message_source_key(conversation_id: int, message: dict[str, Any]) -> str:
     # Keep identity independent from content so a corrected/changed source row
     # updates the archived message instead of creating a duplicate. The inputs
-    # must stay stable: changing them would duplicate every archived message.
+    # must stay stable: changing them would duplicate every archived message
+    # (schema v4 re-keyed existing rows when the server id was introduced).
+    server_key = server_message_key(conversation_id, message.get("server_id"))
+    if server_key:
+        return server_key
     raw = "|".join(
         [
             str(conversation_id),

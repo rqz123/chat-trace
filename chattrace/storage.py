@@ -157,7 +157,7 @@ CREATE TABLE IF NOT EXISTS ai_window_cache (
 """
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 ACTIVE_JOB_STATUSES = ("queued", "running")
 
@@ -213,6 +213,8 @@ class Storage:
                 self._migrate_to_v2(conn)
             if version < 3:
                 self._migrate_to_v3(conn)
+            if version < 4:
+                self._migrate_to_v4(conn)
             conn.execute(
                 "INSERT OR REPLACE INTO app_meta(key, value) VALUES('schema_version', ?)",
                 (str(SCHEMA_VERSION),),
@@ -237,6 +239,40 @@ class Storage:
         ).fetchone()
         if exists and conn.execute("SELECT COUNT(*) FROM summaries").fetchone()[0] == 0:
             conn.execute("DROP TABLE summaries")
+
+    @staticmethod
+    def _migrate_to_v4(conn: sqlite3.Connection) -> None:
+        # v1-v3 keyed messages by local_id/real_sender_id, which differ between
+        # computers, so syncing a moved archive on another computer inserted
+        # every message again. Re-key by server id and merge the copies into
+        # the oldest row, keeping topic-summary references.
+        from .wechat_adapter import server_message_key
+
+        rows = conn.execute(
+            "SELECT id, conversation_id, source_server_id, source_key FROM messages ORDER BY id"
+        ).fetchall()
+        keep: dict[str, int] = {}
+        rekey: list[tuple[str, int]] = []
+        merged = 0
+        for row in rows:
+            key = server_message_key(row["conversation_id"], row["source_server_id"])
+            if key is None:
+                continue
+            if key not in keep:
+                keep[key] = row["id"]
+                if row["source_key"] != key:
+                    rekey.append((key, row["id"]))
+                continue
+            conn.execute(
+                "INSERT OR IGNORE INTO summary_topic_sources(topic_id, message_id) "
+                "SELECT topic_id, ? FROM summary_topic_sources WHERE message_id=?",
+                (keep[key], row["id"]),
+            )
+            conn.execute("DELETE FROM messages WHERE id=?", (row["id"],))
+            merged += 1
+        conn.executemany("UPDATE messages SET source_key=? WHERE id=?", rekey)
+        if merged:
+            logger.info("schema v4: 已合并 %d 条跨电脑重复消息", merged)
 
     @staticmethod
     def _ensure_fts(conn: sqlite3.Connection) -> bool:
