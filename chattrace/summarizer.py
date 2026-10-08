@@ -32,8 +32,8 @@ from .storage import Storage, utc_now
 logger = logging.getLogger("chattrace.summarizer")
 
 PROMPT_DIR = Path(__file__).with_name("prompts")
-EXTRACTION_PROMPT_VERSION = "wechat-topic-extraction-v2"
-MERGE_PROMPT_VERSION = "wechat-topic-merge-v2"
+EXTRACTION_PROMPT_VERSION = "wechat-topic-extraction-v3"
+MERGE_PROMPT_VERSION = "wechat-topic-merge-v3"
 
 # Same tiers as zoom-chat-kb-hub so both tools behave alike with one key.
 MODEL_TIERS = {"low": "gpt-5-mini", "mid": "gpt-5.6-luna", "high": "gpt-5.6-terra"}
