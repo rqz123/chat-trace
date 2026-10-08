@@ -71,6 +71,7 @@ $env:CHATTRACE_WECHATAUTO_SOURCE = "C:\path\to\wechatauto-replica"
 - 如果微信在操作前已在运行，会跳过启动和登录等待，直接等待数据稳定后归档。
 - 未检测到登录（10 分钟）、微信持续写入超过 20 分钟、或微信中途退出时，流程停止，微信保持当前状态，已写入的归档不受影响。
 - 找不到微信安装位置时，可设置 `CHATTRACE_WEIXIN_EXE` 指向 `Weixin.exe`。
+- 「文档」文件夹被重定向（如 OneDrive）时会自动按系统实际路径查找 `xwechat_files`；仍找不到时可设置 `CHATTRACE_WECHAT_DATA_DIR` 指向 `xwechat_files` 或其上级目录。
 - 当前版本不提供自动关闭：正常关闭窗口只会让微信最小化到托盘，而强制结束进程可能打断数据库写入。
 
 ## 话题总结
