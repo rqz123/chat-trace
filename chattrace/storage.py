@@ -540,6 +540,21 @@ class Storage:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def job_items(self, job_id: int) -> list[dict[str, Any]]:
+        """Per-conversation results of one sync job, most new messages first."""
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT i.conversation_id, c.display_name, i.status, i.scanned_count,
+                       i.inserted_count, i.updated_count, i.skipped_count, i.error_message
+                FROM sync_job_items i JOIN conversations c ON c.id=i.conversation_id
+                WHERE i.job_id=?
+                ORDER BY i.inserted_count DESC, i.updated_count DESC, i.id
+                """,
+                (job_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def query_messages(
         self,
         *,

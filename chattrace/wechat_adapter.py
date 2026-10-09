@@ -549,10 +549,31 @@ class WeChatReader:
         reader = self._open()
         sessions = reader.get_sessions(limit=limit)
         names = self.nicknames()
+        member_titles: dict[str, str] | None = None
         for session in sessions:
             username = str(session.get("username") or "")
-            session["display_name"] = names.get(username) or username
+            name = names.get(username) or ""
+            if not name or name == username:
+                if username.endswith("@chatroom"):
+                    if member_titles is None:
+                        member_titles = self._unnamed_group_titles()
+                    name = member_titles.get(username, "")
+            session["display_name"] = name or username
         return sessions
+
+    def _unnamed_group_titles(self) -> dict[str, str]:
+        """Titles for groups without a name, built the way WeChat shows them."""
+        try:
+            groups = self._open().get_groups()
+        except Exception:
+            logger.warning("读取群成员失败，没有群名的群将显示为群 ID")
+            return {}
+        me = self.self_username
+        return {
+            str(group["username"]): title
+            for group in groups
+            if (title := unnamed_group_title(group.get("members") or [], me))
+        }
 
     @contextmanager
     def open_conversation(self, username: str) -> Iterator[ConversationSource | None]:
@@ -604,6 +625,27 @@ def remove_decrypted_cache(settings: Settings) -> tuple[int, int]:
     if failed:
         logger.warning("有 %d 个解密副本暂时无法删除，将在下次同步后重试", failed)
     return removed, failed
+
+
+UNNAMED_GROUP_TITLE_NAMES = 4
+
+
+def unnamed_group_title(members: list[dict[str, Any]], self_username: str) -> str:
+    """"A、B、C、D… (N)" from the other members, like WeChat's chat title.
+
+    Returns "" when no other member has a usable name.
+    """
+    others = sorted(
+        (m for m in members if m.get("username") and m.get("username") != self_username),
+        key=lambda m: str(m["username"]),
+    )
+    labels = [str(m.get("remark") or m.get("nick_name") or m["username"]) for m in others]
+    if not labels:
+        return ""
+    title = "、".join(labels[:UNNAMED_GROUP_TITLE_NAMES])
+    if len(labels) > UNNAMED_GROUP_TITLE_NAMES:
+        title += "…"
+    return f"{title} ({len(members)})"
 
 
 def server_message_key(conversation_id: int, server_id: Any) -> str | None:

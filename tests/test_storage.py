@@ -232,3 +232,14 @@ def test_v4_merges_messages_archived_on_two_computers(tmp_path: Path):
     for local_id in (59, 79, 1234):
         message = {"server_id": 777, "local_id": local_id, "sender_id": local_id}
         assert message_source_key(cid, message) == rows[0]["source_key"]
+
+
+def test_unnamed_group_with_member_title_is_shown(tmp_path: Path):
+    storage = Storage(tmp_path / "test.db")
+    storage.initialize()
+    storage.upsert_conversations([{"username": "g@chatroom", "display_name": "g@chatroom", "last_time": 1}])
+    assert storage.list_conversations()[0]["hidden"] == 1
+    # The next scan builds a title from member names: the group is shown again.
+    storage.upsert_conversations([{"username": "g@chatroom", "display_name": "汪洋、张凝 (3)", "last_time": 2}])
+    row = storage.list_conversations()[0]
+    assert (row["display_name"], row["hidden"]) == ("汪洋、张凝 (3)", 0)

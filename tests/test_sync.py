@@ -192,3 +192,12 @@ def test_interrupted_jobs_are_recovered(tmp_path: Path):
     assert storage.recover_interrupted_jobs() == 1
     assert storage.active_job_id() is None
     assert job(storage, job_id)["status"] == "interrupted"
+
+
+def test_job_items_report_per_conversation_results(tmp_path: Path):
+    storage, service, _, _ = make_service(tmp_path)
+    job_id = service.start(wait=True)
+    items = storage.job_items(job_id)
+    assert [(i["display_name"], i["status"], i["inserted_count"]) for i in items] == [("Chat", "success", 2)]
+    rerun = storage.job_items(service.start(wait=True))
+    assert rerun[0]["inserted_count"] == 0

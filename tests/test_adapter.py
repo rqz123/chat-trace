@@ -8,6 +8,7 @@ from chattrace.wechat_adapter import (
     read_key_file,
     seal_key_file,
     split_group_content,
+    unnamed_group_title,
     win32crypt,
     write_key_file,
 )
@@ -103,3 +104,18 @@ def test_key_file_is_sealed_with_dpapi(tmp_path):
 
     write_key_file(path, {"x": b"\x01"})
     assert read_key_file(path) == {"x": b"\x01"}
+
+
+def test_unnamed_group_title_matches_wechat():
+    members = [
+        {"username": SELF, "nick_name": "我"},
+        {"username": "wxid_d", "nick_name": "张凝"},
+        {"username": "wxid_b", "nick_name": "何金水", "remark": "何金水- IT"},
+        {"username": "wxid_a", "nick_name": "Siqu Liu"},
+        {"username": "wxid_c", "nick_name": "汪洋"},
+    ]
+    assert unnamed_group_title(members, SELF) == "Siqu Liu、何金水- IT、汪洋、张凝 (5)"
+    more = members + [{"username": "wxid_e", "nick_name": "杨铮"}]
+    assert unnamed_group_title(more, SELF) == "Siqu Liu、何金水- IT、汪洋、张凝… (6)"
+    # Only the account itself: no usable title, the group keeps its id.
+    assert unnamed_group_title(members[:1], SELF) == ""

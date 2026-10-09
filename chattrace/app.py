@@ -240,6 +240,10 @@ def create_app(
     def jobs(limit: int = Query(20, ge=1, le=100)):
         return storage.list_jobs(limit)
 
+    @app.get("/api/jobs/{job_id}/items")
+    def job_items(job_id: int):
+        return storage.job_items(job_id)
+
     @app.get("/api/messages")
     def messages(
         conversation_id: list[int] | None = Query(default=None),

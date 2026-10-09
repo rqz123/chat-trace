@@ -102,13 +102,52 @@ function renderActiveSync(job) {
   const progress = $('#sync-progress-bar');
   progress.style.width = total > 0 ? `${percent}%` : '35%';
   progress.classList.toggle('indeterminate', total === 0);
-  $('#sync-stats').innerHTML = [
+  $('#sync-stats').innerHTML = syncStatsHtml([
     ['已扫描', total > 0 ? `${scanned} / ${total}` : String(scanned)],
     ['新增', job.inserted_count || 0],
     ['更新', job.updated_count || 0],
     ['跳过', job.skipped_count || 0],
     ['错误', job.error_count || 0],
-  ].map(([label, value]) => `<span><small>${label}</small><strong>${value}</strong></span>`).join('');
+  ]);
+}
+
+const syncStatsHtml = (stats) => stats
+  .map(([label, value]) => `<span><small>${label}</small><strong>${value}</strong></span>`).join('');
+
+// Final result of the latest finished sync: totals plus what changed per conversation.
+async function renderSyncResult(job) {
+  const card = $('#sync-result');
+  if (!job || ['queued', 'running'].includes(job.status)) {
+    card.hidden = true;
+    return;
+  }
+  if (state.resultJobKey !== `${job.id}:${job.status}`) {
+    state.resultItems = await api(`/api/jobs/${job.id}/items`);
+    state.resultJobKey = `${job.id}:${job.status}`;
+  }
+  const items = state.resultItems;
+  const inserted = Number(job.inserted_count || 0);
+  const label = job.status === 'success' ? '同步完成' : statusName(job.status);
+  $('#sync-result-title').textContent = inserted ? `${label}：新增 ${inserted} 条消息` : `${label}：没有新消息`;
+  $('#sync-result-time').textContent = fmtTime(job.finished_at || job.created_at);
+  $('#sync-result-stats').innerHTML = syncStatsHtml([
+    ['会话', items.length],
+    ['新增', inserted],
+    ['更新', job.updated_count || 0],
+    ['跳过', job.skipped_count || 0],
+    ['错误', job.error_count || 0],
+  ]);
+  const changed = items.filter((item) => item.inserted_count || item.updated_count || item.status !== 'success');
+  const unchanged = items.length - changed.length;
+  $('#sync-result-items').innerHTML = changed.map((item) => `
+    <div class="result-row" title="${escapeHtml(item.error_message || '')}">
+      <span>${escapeHtml(item.display_name)}</span>
+      ${item.status === 'success' ? '' : `<span class="pill bad">${statusName(item.status)}</span>`}
+      <strong>${item.inserted_count ? `+${item.inserted_count}` : ''}</strong>
+      <span class="muted">${item.updated_count ? `更新 ${item.updated_count}` : ''}</span>
+    </div>
+  `).join('') + (unchanged ? `<p class="muted">${changed.length ? '其余 ' : ''}${unchanged} 个会话没有新消息</p>` : '');
+  card.hidden = false;
 }
 
 async function loadJobs() {
@@ -116,6 +155,7 @@ async function loadJobs() {
     const jobs = await api('/api/jobs');
     const active = jobs.find((job) => ['queued', 'running'].includes(job.status));
     renderActiveSync(active);
+    await renderSyncResult(active ? null : jobs[0]);
     $('#jobs').innerHTML = jobs.length ? jobs.map((job) => `
       <div class="job" title="${escapeHtml(job.error_message || '')}">
         <span class="pill">${statusName(job.status)}</span>
