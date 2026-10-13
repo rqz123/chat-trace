@@ -62,7 +62,8 @@ async function loadStatus() {
     state.wechatRunning = status.running;
     $('#orch-start').textContent = status.running ? '等待稳定后归档' : '启动微信并等待同步';
     const metrics = [
-      ['微信状态', status.running ? '正在运行' : '未运行', status.running],
+      ['微信状态', !status.running ? '未运行' : status.logged_in ? '已登录'
+        : status.logged_out ? '已退出登录' : '未登录', status.running && status.logged_in],
       ['微信版本', status.version || '未知', status.compatible],
       ['只读兼容', status.compatible ? '已验证' : '已阻止', status.compatible],
       ['已选会话', String(status.selected_conversations), true],

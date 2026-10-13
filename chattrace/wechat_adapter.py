@@ -49,10 +49,12 @@ class WeChatStatus:
     database_dir_found: bool
     compatible: bool
     message: str
+    # The same WeChat process was logged in earlier and is back at the login window.
+    logged_out: bool = False
 
     @property
     def can_sync(self) -> bool:
-        return self.running and self.compatible and self.database_dir_found
+        return self.running and self.logged_in and self.compatible and self.database_dir_found
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -145,6 +147,41 @@ def _weixin_processes() -> list[psutil.Process]:
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
     return processes
+
+
+# Main Weixin.exe process last seen logged in. Readers are created per request,
+# so this lives at module level.
+_logged_in_main_pid: int | None = None
+
+
+def login_state(processes: list[psutil.Process]) -> tuple[bool, bool]:
+    """``(logged_in, logged_out)`` from the Weixin.exe process tree.
+
+    At the login window WeChat runs a single Weixin.exe. After login it starts
+    helper Weixin.exe children (wxutility, wxocr, xplayer, ...), which exit
+    again on logout while the main process stays. Only process ids and parents
+    are read.
+    """
+    global _logged_in_main_pid
+    pids = {p.pid for p in processes}
+    mains: set[int] = set()
+    helpers = 0
+    for process in processes:
+        try:
+            parent = process.ppid()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+        if parent in pids:
+            helpers += 1
+        else:
+            mains.add(process.pid)
+    if helpers:
+        _logged_in_main_pid = next(iter(mains), None)
+        return True, False
+    logged_out = _logged_in_main_pid is not None and _logged_in_main_pid in mains
+    if not logged_out:
+        _logged_in_main_pid = None
+    return False, logged_out
 
 
 def _install_patches(module) -> None:
@@ -496,29 +533,35 @@ class WeChatReader:
             database_found = bool(module.auto_detect_db_dir())
         except Exception:
             database_found = False
+        logged_in, logged_out = login_state(processes)
         if version is None:
             message = "无法读取微信完整版本号"
         elif not compatible:
             message = f"微信 {version} 尚未进入兼容白名单"
+        elif logged_out:
+            message = "微信已退出登录，请重新登录后再同步"
+        elif not logged_in:
+            message = "微信已运行，但尚未登录"
         elif not database_found:
             message = "未找到微信本地数据库目录"
         else:
-            message = "微信已运行，可以执行只读同步"
+            message = "微信已登录，可以执行只读同步"
         return WeChatStatus(
             True,
-            database_found,
+            logged_in,
             version,
             executable,
             database_found,
             compatible,
             message,
+            logged_out,
         )
 
     def _open(self):
         if self._reader is not None:
             return self._reader
         status = self.status()
-        if not status.running or not status.database_dir_found:
+        if not status.running or not status.logged_in or not status.database_dir_found:
             raise WeChatUnavailable(status.message)
         if not status.compatible:
             raise UnsupportedWeChatVersion(status.message)

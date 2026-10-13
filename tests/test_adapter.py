@@ -119,3 +119,26 @@ def test_unnamed_group_title_matches_wechat():
     assert unnamed_group_title(more, SELF) == "Siqu Liu、何金水- IT、汪洋、张凝… (6)"
     # Only the account itself: no usable title, the group keeps its id.
     assert unnamed_group_title(members[:1], SELF) == ""
+
+
+class _Proc:
+    def __init__(self, pid, parent):
+        self.pid, self._parent = pid, parent
+
+    def ppid(self):
+        return self._parent
+
+
+def test_login_state_from_weixin_process_tree(monkeypatch):
+    import chattrace.wechat_adapter as adapter
+
+    monkeypatch.setattr(adapter, "_logged_in_main_pid", None)
+    login_window = [_Proc(10, 1)]
+    logged_in = [_Proc(10, 1), _Proc(11, 10), _Proc(12, 10)]
+    assert adapter.login_state(login_window) == (False, False)
+    assert adapter.login_state(logged_in) == (True, False)
+    # Helpers exit on logout while the main process stays.
+    assert adapter.login_state(login_window) == (False, True)
+    # A restarted WeChat at the login window has simply not logged in.
+    assert adapter.login_state([_Proc(20, 1)]) == (False, False)
+    assert adapter.login_state(login_window) == (False, False)
