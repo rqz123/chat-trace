@@ -22,3 +22,5 @@
 .source-console{height:auto;max-height:340px;min-height:0;margin-top:8px}
 .selection-actions{display:flex;gap:10px;align-items:center}
 .summary-actions button{white-space:nowrap}
+.console .summary-mark{display:flex;align-items:center;gap:10px;padding:3px 14px;color:#e2b85c;font-size:12px;white-space:nowrap;user-select:none;-webkit-user-select:none}
+.console .summary-mark::before,.console .summary-mark::after{content:"";flex:1;border-top:1px dashed #8a6d2c}

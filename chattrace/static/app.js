@@ -54,6 +54,10 @@ document.querySelectorAll('.nav').forEach((button) => {
     if (button.dataset.page === 'messages' || button.dataset.page === 'summary') fillConversationSelectors();
     // Show the latest messages right away instead of an empty window.
     if (button.dataset.page === 'messages' && !state.messageOffset && $('#message-conversation').value) searchMessages(false);
+    // A summary may have been generated meanwhile; move the marker.
+    else if (button.dataset.page === 'messages' && state.messageOffset) {
+      loadSummaryFrontier(Number($('#message-conversation').value)).then(placeSummaryMark);
+    }
     if (button.dataset.page === 'summary') openSummaryPage();
   };
 });
@@ -322,6 +326,7 @@ async function searchMessages(append = false) {
     if (end) params.set('end_at', end);
     if (query) params.set('q', query);
     state.messageLoading = true;
+    if (!append) await loadSummaryFrontier(Number(conversationId));
     const result = await api(`/api/messages?${params}`);
     state.messageTotal = result.total;
     const terms = query.split(/\s+/).filter(Boolean);
@@ -336,11 +341,52 @@ async function searchMessages(append = false) {
     state.messageOffset += result.items.length;
     $('#message-count').textContent = `已显示 ${state.messageOffset} / 共 ${result.total} 条`;
     $('#message-more').hidden = state.messageOffset >= result.total;
+    placeSummaryMark();
   } catch (error) {
     toast(error.message, true);
   } finally {
     state.messageLoading = false;
   }
+}
+
+// The furthest point any successful summary of this conversation covers.
+async function loadSummaryFrontier(conversationId) {
+  state.summaryFrontier = null;
+  try {
+    const summaries = await api(`/api/summaries?conversation_id=${conversationId}&limit=500`);
+    for (const summary of summaries) {
+      if (summary.status !== 'success') continue;
+      if (!state.summaryFrontier || summary.range_end > state.summaryFrontier.end) {
+        state.summaryFrontier = {end: summary.range_end, label: summary.range_label || '自定义', created: summary.created_at};
+      }
+    }
+  } catch (error) {
+    // The marker is a convenience; browsing works without it.
+  }
+}
+
+// Draw "已总结到此" between the last summarized message and the next one.
+// It is not a message line, so selections may cross it and it is never copied.
+function placeSummaryMark() {
+  const list = $('#message-list');
+  list.querySelector('.summary-mark')?.remove();
+  const frontier = state.summaryFrontier;
+  if (!frontier) return;
+  const lines = [...list.querySelectorAll('.line')];
+  const covered = (line) => Number(line.dataset.ts) <= frontier.end;
+  const newestFirst = $('#message-order').value === 'desc';
+  // Newest first: the mark sits above the first covered line.
+  // Oldest first: below the last covered line, i.e. above the first uncovered one.
+  let anchor = newestFirst ? lines.find(covered) : lines.find((line) => !covered(line));
+  const allLoaded = state.messageOffset >= state.messageTotal;
+  if (!anchor && !(lines.length && !newestFirst && allLoaded)) return;  // boundary not loaded yet
+  const generated = new Date(frontier.created).toLocaleString([], {month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'});
+  const mark = document.createElement('div');
+  mark.className = 'summary-mark';
+  mark.title = `总结范围截止 ${consoleTime(frontier.end)}`;
+  mark.textContent = `已总结到此 · ${frontier.label}（${generated} 生成）`;
+  if (anchor) list.insertBefore(mark, anchor);
+  else list.appendChild(mark);
 }
 
 const consoleTime = (seconds) => {
