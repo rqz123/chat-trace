@@ -52,6 +52,8 @@ document.querySelectorAll('.nav').forEach((button) => {
     history.replaceState(null, '', `#${button.dataset.page}`);
     if (button.dataset.page === 'conversations') loadConversations();
     if (button.dataset.page === 'messages' || button.dataset.page === 'summary') fillConversationSelectors();
+    // Show the latest messages right away instead of an empty window.
+    if (button.dataset.page === 'messages' && !state.messageOffset && $('#message-conversation').value) searchMessages(false);
     if (button.dataset.page === 'summary') openSummaryPage();
   };
 });
@@ -319,27 +321,97 @@ async function searchMessages(append = false) {
     if (start) params.set('start_at', start);
     if (end) params.set('end_at', end);
     if (query) params.set('q', query);
+    state.messageLoading = true;
     const result = await api(`/api/messages?${params}`);
     state.messageTotal = result.total;
-    const markup = result.items.map((message) => `
-      <article class="message">
-        <div class="message-meta"><span class="sender ${message.is_self ? 'self' : ''}">${escapeHtml(senderName(message))}</span><span>${escapeHtml(message.conversation_name)}</span><span>${fmtTime(message.source_created_at)}</span></div>
-        <div>${escapeHtml(message.content)}</div>
-      </article>
-    `).join('');
-    if (append) $('#message-list').insertAdjacentHTML('beforeend', markup);
-    else $('#message-list').innerHTML = markup || '<p class="muted">没有符合条件的消息</p>';
+    const terms = query.split(/\s+/).filter(Boolean);
+    const markup = result.items.map((message) => consoleLine(message, terms)).join('');
+    const list = $('#message-list');
+    if (append) list.insertAdjacentHTML('beforeend', markup);
+    else {
+      list.innerHTML = markup || '<div class="console-empty">没有符合条件的消息</div>';
+      list.scrollTop = 0;
+      updateMessageSelection();  // old lines and their selection are gone
+    }
     state.messageOffset += result.items.length;
     $('#message-count').textContent = `已显示 ${state.messageOffset} / 共 ${result.total} 条`;
     $('#message-more').hidden = state.messageOffset >= result.total;
   } catch (error) {
     toast(error.message, true);
+  } finally {
+    state.messageLoading = false;
   }
+}
+
+const consoleTime = (seconds) => {
+  const d = new Date(seconds * 1000);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+// One terminal-style line: time, sender, message. The spaces between the
+// columns are real text, so a selection copies as "time  who  message".
+function consoleLine(message, terms = []) {
+  const who = senderName(message);
+  let text = escapeHtml(message.content);
+  for (const term of terms) {
+    if (/[&<>"']/.test(term)) continue; // escaping would split the match
+    const pattern = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    text = text.replace(pattern, (match) => `<mark>${match}</mark>`);
+  }
+  return `<div class="line" data-ts="${message.source_created_at}"><span class="t">${consoleTime(message.source_created_at)}</span>  <span class="w ${message.is_self ? 'self' : ''}" title="${escapeHtml(who)}">${escapeHtml(who)}</span>  <span class="m">${text}</span></div>`;
 }
 
 function senderName(message) {
   if (message.is_self) return '我';
   return message.sender_display_name || message.sender_source_id || '未知发送者';
+}
+
+// Message lines touched by the current text selection in the message window.
+function selectedMessageRange() {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || !selection.rangeCount) return null;
+  const range = selection.getRangeAt(0);
+  const list = $('#message-list');
+  if (!list.contains(range.commonAncestorContainer)) return null;
+  const stamps = [...list.querySelectorAll('.line')]
+    .filter((line) => range.intersectsNode(line))
+    .map((line) => Number(line.dataset.ts));
+  if (!stamps.length) return null;
+  return {count: stamps.length, start: Math.min(...stamps), end: Math.max(...stamps)};
+}
+
+function updateMessageSelection() {
+  state.messageSelection = selectedMessageRange();
+  const selection = state.messageSelection;
+  $('#message-summarize').hidden = !selection;
+  $('#message-selection').textContent = selection
+    ? `已选中 ${selection.count} 条：${consoleTime(selection.start)} – ${consoleTime(selection.end)}`
+    : '';
+}
+
+async function summarizeSelection() {
+  const selection = state.messageSelection;
+  const conversationId = Number($('#message-conversation').value);
+  if (!selection || !conversationId) return;
+  const body = {conversation_id: conversationId, start_at: selection.start, end_at: selection.end};
+  try {
+    const preview = await api('/api/summaries/preview', {method: 'POST', body: JSON.stringify(body)});
+    if (!preview.ai.configured) throw new Error('未配置 OpenAI API key，请先在“话题总结”页查看配置说明');
+    if (preview.too_many) throw new Error(`消息超过 ${preview.max_messages} 条，请缩小选择范围`);
+    const name = $('#message-conversation').selectedOptions[0].textContent;
+    // The summary covers the whole time span, not only lines a keyword filter shows.
+    const filtered = $('#message-query').value.trim() ? '\n注意：总结按这段时间内的全部消息计算，不只是关键词匹配的消息。' : '';
+    if (!confirm(`用选中的消息生成话题总结？\n\n会话：${name}\n时间：${consoleTime(selection.start)} – ${consoleTime(selection.end)}\n共 ${preview.message_count} 条消息，将发送到 OpenAI（${preview.ai.model}）。${filtered}`)) return;
+    const summary = await api('/api/summaries', {method: 'POST', body: JSON.stringify({...body, range_label: '选中消息'})});
+    window.getSelection().removeAllRanges();
+    updateMessageSelection();
+    state.viewingSummary = summary.id;  // keep the summary page from opening another one
+    document.querySelector('.nav[data-page="summary"]').click();
+    viewSummary(summary.id);
+  } catch (error) {
+    toast(error.message, true);
+  }
 }
 
 function clearMessageFilters(order) {
@@ -523,7 +595,7 @@ function renderSummary(summary) {
         <div class="topic-section"><h4>讨论</h4>${listHtml(topic.discussion)}</div>
         <div class="topic-section"><h4>结论</h4>${listHtml(topic.conclusions)}</div>
         <div class="topic-section"><h4>开放问题</h4>${listHtml(topic.open_questions)}</div>
-        <div class="topic-sources"><button class="quiet" data-topic="${topic.id}">查看原文（${topic.source_count} 条）</button><div class="source-list" hidden></div></div>
+        <div class="topic-sources"><button class="quiet" data-topic="${topic.id}">查看原文（${topic.source_count} 条）</button><div class="source-list console source-console" hidden></div></div>
       </article>`).join('');
   view.innerHTML = head + topics;
 
@@ -533,7 +605,7 @@ function renderSummary(summary) {
       if (!list.hidden) { list.hidden = true; return; }
       try {
         const messages = await api(`/api/summary-topics/${button.dataset.topic}/messages`);
-        list.innerHTML = messages.map((message) => `<div><small>${shortTime(message.source_created_at)} ${escapeHtml(senderName(message))}</small>${escapeHtml(message.content)}</div>`).join('');
+        list.innerHTML = messages.map((message) => consoleLine(message)).join('');
         list.hidden = false;
       } catch (error) {
         toast(error.message, true);
@@ -737,6 +809,20 @@ $('#refresh-jobs').onclick = loadJobs;
 $('#conversation-filter').oninput = renderConversations;
 $('#message-search').onclick = () => searchMessages(false);
 $('#message-more').onclick = () => searchMessages(true);
+document.addEventListener('selectionchange', () => {
+  // Coalesce the bursts fired while dragging.
+  cancelAnimationFrame(state.selectionFrame);
+  state.selectionFrame = requestAnimationFrame(updateMessageSelection);
+});
+// Keep the text selection alive when the button is pressed.
+$('#message-summarize').onmousedown = (event) => event.preventDefault();
+$('#message-summarize').onclick = summarizeSelection;
+// Load the next page when the message window is scrolled to its end.
+$('#message-list').addEventListener('scroll', () => {
+  const list = $('#message-list');
+  if (!state.messageLoading && state.messageOffset < state.messageTotal
+      && list.scrollTop + list.clientHeight >= list.scrollHeight - 60) searchMessages(true);
+});
 $('#message-conversation').onchange = () => searchMessages(false);
 $('#browse-latest').onclick = () => { clearMessageFilters('desc'); searchMessages(false); };
 $('#browse-earliest').onclick = () => { clearMessageFilters('asc'); searchMessages(false); };

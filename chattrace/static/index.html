@@ -12,8 +12,8 @@
       <div class="brand"><span class="mark">迹</span><div><strong>聊迹</strong><small>ChatTrace</small></div></div>
       <nav>
         <button class="nav active" data-page="status">运行状态</button>
-        <button class="nav" data-page="conversations">会话选择</button>
         <button class="nav" data-page="messages">消息查询</button>
+        <button class="nav" data-page="conversations">会话选择</button>
         <button class="nav" data-page="summary">话题总结</button>
       </nav>
       <p class="local-note">只读 · 本地保存<br>仅同步明确选择的会话</p>
@@ -70,7 +70,8 @@
       <section id="page-messages" class="page">
         <div class="toolbar wrap"><select id="message-conversation"><option value="">全部已归档会话</option></select><input id="message-start" type="date"><input id="message-end" type="date"><input id="message-query" placeholder="关键词，空格分隔表示同时包含"><select id="message-order"><option value="desc">最新在前</option><option value="asc">最早在前</option></select><button id="message-search" class="primary">浏览会话</button></div>
         <div class="browse-actions"><button id="browse-latest" class="quiet">最近消息</button><button id="browse-earliest" class="quiet">从最早开始</button><button id="browse-seven-days" class="quiet">最近 7 天</button></div>
-        <p id="message-count" class="muted"></p><div id="message-list" class="timeline"></div>
+        <div class="console-bar"><span id="message-count" class="muted"></span><span class="selection-actions"><span id="message-selection" class="muted"></span><button id="message-summarize" class="primary" hidden>用选中的消息生成话题总结</button></span></div>
+        <div id="message-list" class="console" tabindex="0"><div class="console-empty">选择会话后浏览消息</div></div>
         <button id="message-more" class="quiet load-more" hidden>继续加载</button>
       </section>
 
